@@ -1,6 +1,8 @@
 use dioxus::prelude::*;
 
-use crate::app::domain::skill::{SkillDTO, SkillInstallRecord, SkillInstallState, SkillManifest, SkillRemoteIndex};
+use crate::app::domain::skill::{
+    AgentAppDTO, AgentSettingsDTO, SkillDTO, SkillInstallRecord, SkillInstallState, SkillManifest, SkillRemoteIndex,
+};
 use crate::app::services::{skill_service, store_service, sync_service};
 
 #[get("/api/skills/local/list")]
@@ -31,6 +33,31 @@ pub async fn skills_local_set_enabled(skill_id: String, enabled: bool) -> Result
 #[post("/api/skills/local/update-manifest")]
 pub async fn skills_local_update_manifest(skill_id: String, manifest: SkillManifest) -> Result<SkillDTO, ServerFnError> {
     skill_service::update_skill_manifest(skill_id, manifest).map_err(ServerFnError::new)
+}
+
+#[get("/api/skills/local/agent-apps")]
+pub async fn skills_local_agent_apps() -> Result<Vec<AgentAppDTO>, ServerFnError> {
+    skill_service::list_agent_apps().map_err(ServerFnError::new)
+}
+
+#[post("/api/skills/local/rebuild-links")]
+pub async fn skills_local_rebuild_links() -> Result<(), ServerFnError> {
+    skill_service::rebuild_skill_links().map_err(ServerFnError::new)
+}
+
+#[post("/api/skills/local/rebuild-links-for-app")]
+pub async fn skills_local_rebuild_links_for_app(app_name: String) -> Result<(), ServerFnError> {
+    skill_service::rebuild_skill_links_for_app(app_name).map_err(ServerFnError::new)
+}
+
+#[get("/api/skills/local/agent-settings")]
+pub async fn skills_local_agent_settings() -> Result<AgentSettingsDTO, ServerFnError> {
+    skill_service::get_agent_settings().map_err(ServerFnError::new)
+}
+
+#[post("/api/skills/local/agent-settings")]
+pub async fn skills_local_save_agent_settings(settings: AgentSettingsDTO) -> Result<(), ServerFnError> {
+    skill_service::save_agent_settings(settings).map_err(ServerFnError::new)
 }
 
 #[get("/api/skills/store/list")]

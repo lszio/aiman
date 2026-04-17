@@ -5,7 +5,7 @@ use std::io;
 use std::os::unix::fs as unix_fs;
 use std::path::{Path, PathBuf};
 
-use crate::app::domain::skill::{SkillManifest, SkillRemoteIndex};
+use crate::app::domain::skill::{AgentAppDTO, AgentSettingsDTO, SkillManifest, SkillRemoteIndex};
 use serde::{Deserialize, Serialize};
 
 const AIMAN_DIR: &str = ".aiman";
@@ -14,11 +14,27 @@ const MANAGED_DIR_NAME: &str = "_aiman_managed";
 const STORE_CACHE_FILE_NAME: &str = "store_index_cache.json";
 const STORE_REMOTE_FILE_NAME: &str = "store_remote_index.json";
 const AGENTS_REGISTRY_FILE_NAME: &str = "agents.json";
+const AGENTS_SETTINGS_FILE_NAME: &str = "agents_settings.json";
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct AgentRegistration {
     app_name: String,
     skills_dir: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct AgentDiscoverySettings {
+    whitelist: Vec<String>,
+    blacklist: Vec<String>,
+}
+
+impl From<AgentRegistration> for AgentAppDTO {
+    fn from(value: AgentRegistration) -> Self {
+        Self {
+            app_name: value.app_name,
+            skills_dir: value.skills_dir,
+        }
+    }
 }
 
 fn home_dir() -> io::Result<PathBuf> {
@@ -48,6 +64,10 @@ fn store_remote_file() -> io::Result<PathBuf> {
 
 fn agent_registry_file() -> io::Result<PathBuf> {
     Ok(aiman_root_dir()?.join(AGENTS_REGISTRY_FILE_NAME))
+}
+
+fn agent_settings_file() -> io::Result<PathBuf> {
+    Ok(aiman_root_dir()?.join(AGENTS_SETTINGS_FILE_NAME))
 }
 
 fn ensure_parent(path: &Path) -> io::Result<()> {
@@ -97,12 +117,13 @@ fn create_or_replace_symlink(_src: &Path, _dst: &Path) -> io::Result<()> {
 }
 
 fn discover_agent_registrations() -> io::Result<Vec<AgentRegistration>> {
+    let settings = load_discovery_settings().unwrap_or_default();
     let mut apps = Vec::new();
     let registry = agent_registry_file()?;
     if registry.exists() {
         let payload = fs::read_to_string(registry)?;
         if let Ok(parsed) = serde_json::from_str::<Vec<AgentRegistration>>(&payload) {
-            apps.extend(parsed);
+            apps.extend(parsed.into_iter().filter(|item| allow_app(&settings, &item.app_name)));
         }
     }
 
@@ -124,6 +145,9 @@ fn discover_agent_registrations() -> io::Result<Vec<AgentRegistration>> {
         if app_name.is_empty() {
             continue;
         }
+        if !allow_app(&settings, &app_name) {
+            continue;
+        }
         let skills_dir = path.join(SKILLS_DIR_NAME);
         if skills_dir.exists() && skills_dir.is_dir() {
             apps.push(AgentRegistration {
@@ -136,6 +160,62 @@ fn discover_agent_registrations() -> io::Result<Vec<AgentRegistration>> {
     apps.sort_by(|a, b| a.app_name.cmp(&b.app_name));
     apps.dedup_by(|a, b| a.app_name == b.app_name && a.skills_dir == b.skills_dir);
     Ok(apps)
+}
+
+fn allow_app(settings: &AgentDiscoverySettings, app_name: &str) -> bool {
+    if settings.blacklist.iter().any(|item| item == app_name) {
+        return false;
+    }
+    if settings.whitelist.is_empty() {
+        return true;
+    }
+    settings.whitelist.iter().any(|item| item == app_name)
+}
+
+fn load_discovery_settings() -> io::Result<AgentDiscoverySettings> {
+    let path = agent_settings_file()?;
+    if !path.exists() {
+        return Ok(AgentDiscoverySettings::default());
+    }
+    let payload = fs::read_to_string(path)?;
+    let parsed = serde_json::from_str::<AgentDiscoverySettings>(&payload).unwrap_or_default();
+    Ok(parsed)
+}
+
+pub fn get_agent_settings() -> io::Result<AgentSettingsDTO> {
+    let settings = load_discovery_settings()?;
+    let registry_file = agent_registry_file()?;
+    let registry_json = if registry_file.exists() {
+        fs::read_to_string(registry_file)?
+    } else {
+        "[]".to_string()
+    };
+    Ok(AgentSettingsDTO {
+        agents_registry_json: registry_json,
+        whitelist: settings.whitelist,
+        blacklist: settings.blacklist,
+    })
+}
+
+pub fn save_agent_settings(settings: AgentSettingsDTO) -> io::Result<()> {
+    let root = aiman_root_dir()?;
+    fs::create_dir_all(&root)?;
+
+    let registry_path = agent_registry_file()?;
+    fs::write(registry_path, settings.agents_registry_json)?;
+
+    let discover_settings = AgentDiscoverySettings {
+        whitelist: settings.whitelist,
+        blacklist: settings.blacklist,
+    };
+    let payload = serde_json::to_string_pretty(&discover_settings)?;
+    fs::write(agent_settings_file()?, payload)?;
+    Ok(())
+}
+
+pub fn list_agent_apps() -> io::Result<Vec<AgentAppDTO>> {
+    let apps = discover_agent_registrations()?;
+    Ok(apps.into_iter().map(AgentAppDTO::from).collect())
 }
 
 fn managed_skill_ids() -> io::Result<Vec<String>> {
@@ -152,6 +232,14 @@ fn managed_skill_ids() -> io::Result<Vec<String>> {
 }
 
 pub fn synchronize_skill_links() -> io::Result<()> {
+    synchronize_skill_links_internal(None)
+}
+
+pub fn synchronize_skill_links_for_app(app_name: &str) -> io::Result<()> {
+    synchronize_skill_links_internal(Some(app_name))
+}
+
+fn synchronize_skill_links_internal(target_app: Option<&str>) -> io::Result<()> {
     let skills_root = skills_root_dir()?;
     let managed_root = managed_skills_dir()?;
     fs::create_dir_all(&skills_root)?;
@@ -165,6 +253,11 @@ pub fn synchronize_skill_links() -> io::Result<()> {
 
     let managed_ids = managed_skill_ids()?;
     for app in discover_agent_registrations()? {
+        if let Some(target) = target_app {
+            if app.app_name != target {
+                continue;
+            }
+        }
         let agent_dir = PathBuf::from(app.skills_dir.clone());
         fs::create_dir_all(&agent_dir)?;
         for skill_id in &managed_ids {
@@ -177,6 +270,11 @@ pub fn synchronize_skill_links() -> io::Result<()> {
     // 2) Agent owned skills -> central prefixed links, e.g. opencode-create-skill.
     let skills_root_canonical = fs::canonicalize(&skills_root).unwrap_or(skills_root.clone());
     for app in discover_agent_registrations()? {
+        if let Some(target) = target_app {
+            if app.app_name != target {
+                continue;
+            }
+        }
         let agent_dir = PathBuf::from(app.skills_dir.clone());
         if !agent_dir.exists() {
             continue;

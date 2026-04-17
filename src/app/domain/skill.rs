@@ -47,3 +47,16 @@ pub struct SkillDTO {
     pub remote_latest_version: Option<String>,
     pub sync_status: Option<String>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentAppDTO {
+    pub app_name: String,
+    pub skills_dir: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentSettingsDTO {
+    pub agents_registry_json: String,
+    pub whitelist: Vec<String>,
+    pub blacklist: Vec<String>,
+}

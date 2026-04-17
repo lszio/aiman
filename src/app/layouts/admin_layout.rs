@@ -13,6 +13,7 @@ pub fn AdminLayout() -> Element {
                     ul {
                         li { Link { to: Route::SkillsList {}, "Installed Skills" } }
                         li { Link { to: Route::SkillsStore {}, "Skill Store" } }
+                        li { Link { to: Route::Apps {}, "Agent Apps" } }
                     }
                 }
             }

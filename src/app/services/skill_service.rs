@@ -1,6 +1,6 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use crate::app::domain::skill::{SkillDTO, SkillInstallState, SkillManifest};
+use crate::app::domain::skill::{AgentAppDTO, AgentSettingsDTO, SkillDTO, SkillInstallState, SkillManifest};
 use crate::app::infra::{local_fs_repo, manifest_parser};
 use crate::app::services::store_service;
 
@@ -113,4 +113,24 @@ pub fn update_skill_manifest(skill_id: String, updated: SkillManifest) -> Result
         remote_latest_version: None,
         sync_status: Some("manifest_updated".to_string()),
     })
+}
+
+pub fn list_agent_apps() -> Result<Vec<AgentAppDTO>, String> {
+    local_fs_repo::list_agent_apps().map_err(|err| err.to_string())
+}
+
+pub fn rebuild_skill_links() -> Result<(), String> {
+    local_fs_repo::synchronize_skill_links().map_err(|err| err.to_string())
+}
+
+pub fn rebuild_skill_links_for_app(app_name: String) -> Result<(), String> {
+    local_fs_repo::synchronize_skill_links_for_app(&app_name).map_err(|err| err.to_string())
+}
+
+pub fn get_agent_settings() -> Result<AgentSettingsDTO, String> {
+    local_fs_repo::get_agent_settings().map_err(|err| err.to_string())
+}
+
+pub fn save_agent_settings(settings: AgentSettingsDTO) -> Result<(), String> {
+    local_fs_repo::save_agent_settings(settings).map_err(|err| err.to_string())
 }
